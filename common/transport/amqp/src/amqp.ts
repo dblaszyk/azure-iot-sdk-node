@@ -126,7 +126,27 @@ export class Amqp {
               });
           },
           disconnect: (callback) => callback(null, new results.Disconnected()),
-          '*': () => this._fsm.deferUntilTransition('authenticated')
+          attachSenderLink: (endpoint, linkOptions, callback) => {
+            this._fsm.handle('connect', (err) => {
+              if (err) {
+                callback(err)
+              } else {
+                this._fsm.handle('attachSenderLink', endpoint, linkOptions, callback);
+              }
+            })
+          },
+          attachReceiverLink: (endpoint, linkOptions, callback) => {
+            this._fsm.handle('connect', (err) => {
+              if (err) {
+                callback(err)
+              } else {
+                this._fsm.handle('attachReceiverLink', endpoint, linkOptions, callback);
+              }
+            })
+          },
+          detachSenderLink: (endpoint, callback) => this._safeCallback(callback),
+          detachReceiverLink: (endpoint, callback) => this._safeCallback(callback),
+          '*': () => this._fsm.deferUntilTransition('connected')
         },
         connecting: {
           connect: () => this._fsm.deferUntilTransition('connected'),
@@ -162,8 +182,12 @@ export class Amqp {
             }
 
             if (!this._senders[endpoint]) {
-              this._fsm.handle('attachSenderLink', function(err) {
-                (this._senders[endpoint] as SenderLink).send(amqpMessage, done);
+              this._fsm.handle('attachSenderLink', endpoint, null, (err) => {
+                if (err) {
+                  done(err);
+                } else {
+                  (this._senders[endpoint] as SenderLink).send(amqpMessage, done);
+                }
               });
             } else {
               (this._senders[endpoint] as SenderLink).send(amqpMessage, done);
@@ -401,17 +425,10 @@ export class Amqp {
     } else {
       /*Codes_SRS_NODE_COMMON_AMQP_16_028: [The `detachReceiverLink` method shall call detach on the link object corresponding to the endpoint passed as argument.]*/
       /*Codes_SRS_NODE_COMMON_AMQP_16_023: [The `detachSenderLink` method shall call detach on the link object corresponding to the endpoint passed as argument.]*/
-      link.detach((err) => {
-        if (!err) {
-          /*Codes_SRS_NODE_COMMON_AMQP_16_029: [The `detachReceiverLink` method shall call the `done` callback with no arguments if detaching the link succeeded.]*/
-          /*Codes_SRS_NODE_COMMON_AMQP_16_024: [The `detachSenderLink` method shall call the `done` callback with no arguments if detaching the link succeeded.]*/
-          this._safeCallback(detachCallback);
-        } else {
-          /*Codes_SRS_NODE_COMMON_AMQP_16_031: [The `detachReceiverLink` method shall call the `done` callback with an `Error` object if there was an error while detaching the link.]*/
-          /*Codes_SRS_NODE_COMMON_AMQP_16_026: [The `detachSenderLink` method shall call the `done` callback with an `Error` object if there was an error while detaching the link.]*/
-          this._safeCallback(detachCallback, err);
-        }
-      });
+      link.detach();
+      /*Codes_SRS_NODE_COMMON_AMQP_16_029: [The `detachReceiverLink` method shall call the `done` callback with no arguments if detaching the link succeeded.]*/
+      /*Codes_SRS_NODE_COMMON_AMQP_16_024: [The `detachSenderLink` method shall call the `done` callback with no arguments if detaching the link succeeded.]*/
+      this._safeCallback(detachCallback);
     }
   }
 

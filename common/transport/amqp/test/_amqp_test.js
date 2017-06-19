@@ -883,50 +883,38 @@ describe('Amqp', function () {
 
       /*Tests_SRS_NODE_COMMON_AMQP_16_023: [The `detachSenderLink` method shall call detach on the link object corresponding to the endpoint passed as argument.]*/
       it('calls the \'detach\' method on the link object', function (testCallback) {
-        var fakeLink = {
-          detach: function () { return new Promise(function() {}); }
-        };
-        sinon.stub(fakeLink, 'detach').resolves();
+        var fakeLink = new EventEmitter();
+        fakeLink.forceDetach = sinon.stub();
 
         var amqp = new Amqp();
-        amqp._senders[fake_generic_endpoint] = fakeLink;
-        /*Tests_SRS_NODE_COMMON_AMQP_16_024: [The `detachSenderLink` method shall call the `done` callback with no arguments if detaching the link succeeded.]*/
-        amqp.detachSenderLink(fake_generic_endpoint, function(err) {
-          assert.isUndefined(err);
-          assert.isUndefined(amqp._senders[fake_generic_endpoint]);
-          testCallback();
+        amqp._amqp.connect = sinon.stub().resolves();
+        amqp._amqp.createSender = sinon.stub().resolves(fakeLink);
+
+        amqp.attachSenderLink(fake_generic_endpoint, null, function() {
+          /*Tests_SRS_NODE_COMMON_AMQP_16_024: [The `detachSenderLink` method shall call the `done` callback with no arguments if detaching the link succeeded.]*/
+          amqp.detachSenderLink(fake_generic_endpoint, function(err) {
+            assert(fakeLink.forceDetach.calledOnce);
+            testCallback(err);
+          });
         });
       });
 
       /*Tests_SRS_NODE_COMMON_AMQP_16_025: [The `detachSenderLink` method shall call the `done` callback with no arguments if the link for this endpoint doesn't exist.]*/
       it('calls the callback immediately if there\'s no link attached', function (testCallback) {
-        var fakeLink = {
-          detach: function () { return new Promise(function() {}); }
-        };
-        sinon.stub(fakeLink, 'detach').resolves();
-
         var amqp = new Amqp();
-        assert.isUndefined(amqp._senders[fake_generic_endpoint]);
-        amqp.detachSenderLink(fake_generic_endpoint, function(err) {
-          assert.isUndefined(err);
-          assert.isUndefined(amqp._senders[fake_generic_endpoint]);
-          testCallback();
+        amqp._amqp.connect = sinon.stub().resolves();
+        amqp.connect('fakeuri', null, function() {
+          amqp.detachSenderLink(fake_generic_endpoint, function(err) {
+            testCallback(err);
+          });
         });
       });
 
-      /*Tests_SRS_NODE_COMMON_AMQP_16_026: [The `detachSenderLink` method shall call the `done` callback with an `Error` object if there was an error while detaching the link.]*/
-      it('calls the callback with an error if detaching the link causes an error', function (testCallback) {
-        var fakeError = new Error('failed to detach');
-        var fakeLink = {
-          detach: function () { return new Promise(function() {}); }
-        };
-        sinon.stub(fakeLink, 'detach').rejects(fakeError);
-
+      it('calls the callback immediately if already disconnected', function (testCallback) {
         var amqp = new Amqp();
-        amqp._senders[fake_generic_endpoint] = fakeLink;
+        /*Tests_SRS_NODE_COMMON_AMQP_16_024: [The `detachSenderLink` method shall call the `done` callback with no arguments if detaching the link succeeded.]*/
         amqp.detachSenderLink(fake_generic_endpoint, function(err) {
-          assert.strictEqual(fakeError, err);
-          assert.isUndefined(amqp._senders[fake_generic_endpoint]);
+          assert.isUndefined(err);
           testCallback();
         });
       });
@@ -945,49 +933,38 @@ describe('Amqp', function () {
 
       /*Tests_SRS_NODE_COMMON_AMQP_16_028: [The `detachReceiverLink` method shall call detach on the link object corresponding to the endpoint passed as argument.]*/
       it('calls the \'detach\' method on the link object', function (testCallback) {
-        var fakeLink = {
-          _amqpReceiver: {
-            detach: function () { return new Promise(function() {}); }
-          }
-        };
-        sinon.stub(fakeLink._amqpReceiver, 'detach').resolves();
+        var fakeLink = new EventEmitter();
+        fakeLink.forceDetach = sinon.stub();
 
         var amqp = new Amqp();
-        amqp._receivers[fake_generic_endpoint] = fakeLink;
-        /*Tests_SRS_NODE_COMMON_AMQP_16_029: [The `detachReceiverLink` method shall call the `done` callback with no arguments if detaching the link succeeded.]*/
-        amqp.detachReceiverLink(fake_generic_endpoint, function(err) {
-          assert.isUndefined(err);
-          assert.isUndefined(amqp._receivers[fake_generic_endpoint]);
-          testCallback();
+        amqp._amqp.connect = sinon.stub().resolves();
+        amqp._amqp.createReceiver = sinon.stub().resolves(fakeLink);
+
+        amqp.attachReceiverLink(fake_generic_endpoint, null, function() {
+          /*Tests_SRS_NODE_COMMON_AMQP_16_029: [The `detachReceiverLink` method shall call the `done` callback with no arguments if detaching the link succeeded.]*/
+          amqp.detachReceiverLink(fake_generic_endpoint, function(err) {
+            assert(fakeLink.forceDetach.calledOnce);
+            testCallback();
+          });
         });
       });
 
       /*Tests_SRS_NODE_COMMON_AMQP_16_030: [The `detachReceiverLink` method shall call the `done` callback with no arguments if the link for this endpoint doesn't exist.]*/
       it('calls the callback immediately if there\'s no link attached', function (testCallback) {
         var amqp = new Amqp();
-        assert.isUndefined(amqp._receivers[fake_generic_endpoint]);
-        amqp.detachReceiverLink(fake_generic_endpoint, function(err) {
-          assert.isUndefined(err);
-          assert.isUndefined(amqp._receivers[fake_generic_endpoint]);
-          testCallback();
+        amqp._amqp.connect = sinon.stub().resolves();
+        amqp.connect('fakeuri', null, function() {
+          amqp.detachReceiverLink(fake_generic_endpoint, function(err) {
+            testCallback(err);
+          });
         });
       });
 
-      /*Tests_SRS_NODE_COMMON_AMQP_16_031: [The `detachReceiverLink` method shall call the `done` callback with an `Error` object if there was an error while detaching the link.]*/
-      it('calls the callback with an error if detaching the link causes an error', function (testCallback) {
-        var fakeError = new Error('failed to detach');
-        var fakeLink = {
-          _amqpReceiver: {
-            detach: function () { return new Promise(function() {}); }
-          }
-        };
-        sinon.stub(fakeLink._amqpReceiver, 'detach').rejects(fakeError);
-
+      it('calls the callback immediately if already disconnected', function (testCallback) {
         var amqp = new Amqp();
-        amqp._receivers[fake_generic_endpoint] = fakeLink;
+        /*Tests_SRS_NODE_COMMON_AMQP_16_024: [The `detachSenderLink` method shall call the `done` callback with no arguments if detaching the link succeeded.]*/
         amqp.detachReceiverLink(fake_generic_endpoint, function(err) {
-          assert.strictEqual(fakeError, err);
-          assert.isUndefined(amqp._receivers[fake_generic_endpoint]);
+          assert.isUndefined(err);
           testCallback();
         });
       });
