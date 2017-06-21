@@ -54,7 +54,6 @@ export class ClaimsBasedSecurityAgent extends EventEmitter {
   private static _putTokenReceivingEndpoint: string = '$cbs';
   private _amqp10Client: amqp10.AmqpClient;
   private _fsm: machina.Fsm;
-  private _attachCallback: (err?: Error) => void;
   private _senderLink: SenderLink;
   private _receiverLink: ReceiverLink;
   private _putToken: PutTokenStatus = new PutTokenStatus();
@@ -68,75 +67,63 @@ export class ClaimsBasedSecurityAgent extends EventEmitter {
       initialState: 'detached',
       states: {
         detached: {
+          _onEnter: (callback, err) => {
+            if (callback) {
+              callback(err);
+            } else if (err) {
+              this.emit('error', err);
+            }
+          },
           attach: (callback) => {
-            this._attachCallback = callback;
-            this._fsm.transition('attaching');
+            this._fsm.transition('attaching', callback);
           }
          },
         attaching: {
-          _onEnter: () => {
-            let senderAttached = false;
-            let receiverAttached = false;
+          _onEnter: (callback) => {
             this._senderLink.attach((err) => {
               if (err) {
-                this._fsm.transition('detaching');
-                let cb = this._attachCallback;
-                this._attachCallback = null;
-                return cb(err);
+                this._fsm.transition('detached', callback, err);
               } else {
-                senderAttached = true;
-                if (senderAttached && receiverAttached) {
-                  this._fsm.transition('attached');
-                }
-              }
-            });
-
-            this._receiverLink.attach((err) => {
-              if (err) {
-                let cb = this._attachCallback;
-                this._attachCallback = null;
-                this._fsm.transition('detaching');
-                return cb(err);
-              } else {
-                receiverAttached = true;
-                this._receiverLink.on('message', (msg) => {
-                  for (let i = 0; i < this._putToken.outstandingPutTokens.length; i++) {
-                    if (msg.correlationId === this._putToken.outstandingPutTokens[i].correlationId) {
-                      const completedPutToken = this._putToken.outstandingPutTokens[i];
-                      this._putToken.outstandingPutTokens.splice(i, 1);
-                      if (completedPutToken.putTokenCallback) {
-                        /*Codes_SRS_NODE_COMMON_AMQP_06_013: [A put token response of 200 will invoke `putTokenCallback` with null parameters.]*/
-                        let error = null;
-                        if (msg.properties.getValue('status-code') !== 200) {
-                          /*Codes_SRS_NODE_COMMON_AMQP_06_014: [A put token response not equal to 200 will invoke `putTokenCallback` with an error object of UnauthorizedError.]*/
-                          error = new errors.UnauthorizedError(msg.properties.getValue('status-description'));
+                this._receiverLink.attach((err) => {
+                  if (err) {
+                    this._fsm.transition('detaching', callback, err);
+                  } else {
+                    this._receiverLink.on('message', (msg) => {
+                      //
+                      // Regardless of whether we found the put token in the list of outstanding
+                      // operations, accept it.  This could be a put token that we previously
+                      // timed out.  Be happy.  It made it home, just too late to be useful.
+                      //
+                      /*Codes_SRS_NODE_COMMON_AMQP_06_012: [All responses shall be completed.]*/
+                      this._receiverLink.accept(msg);
+                      for (let i = 0; i < this._putToken.outstandingPutTokens.length; i++) {
+                        if (msg.correlationId === this._putToken.outstandingPutTokens[i].correlationId) {
+                          const completedPutToken = this._putToken.outstandingPutTokens[i];
+                          this._putToken.outstandingPutTokens.splice(i, 1);
+                          if (completedPutToken.putTokenCallback) {
+                            /*Codes_SRS_NODE_COMMON_AMQP_06_013: [A put token response of 200 will invoke `putTokenCallback` with null parameters.]*/
+                            let error = null;
+                            if (msg.properties.getValue('status-code') !== 200) {
+                              /*Codes_SRS_NODE_COMMON_AMQP_06_014: [A put token response not equal to 200 will invoke `putTokenCallback` with an error object of UnauthorizedError.]*/
+                              error = new errors.UnauthorizedError(msg.properties.getValue('status-description'));
+                            }
+                            completedPutToken.putTokenCallback(error);
+                          }
+                          break;
                         }
-                        completedPutToken.putTokenCallback(error);
                       }
-                      break;
-                    }
+                    });
+                    this._fsm.transition('attached', callback);
                   }
-                  //
-                  // Regardless of whether we found the put token in the list of outstanding
-                  // operations, accept it.  This could be a put token that we previously
-                  // timed out.  Be happy.  It made it home, just too late to be useful.
-                  //
-                  /*Codes_SRS_NODE_COMMON_AMQP_06_012: [All responses shall be completed.]*/
-                  this._receiverLink.accept(msg);
                 });
-                if (senderAttached && receiverAttached) {
-                  this._fsm.transition('attached');
-                }
               }
             });
           }
          },
         attached: {
-          _onEnter: () => {
-            if (this._attachCallback) {
-              let cb = this._attachCallback;
-              this._attachCallback = null;
-              return cb();
+          _onEnter: (callback) => {
+            if (callback) {
+              return callback();
             }
           },
           attach: (callback) => callback(),
@@ -182,36 +169,34 @@ export class ClaimsBasedSecurityAgent extends EventEmitter {
             }
             /*Codes_SRS_NODE_COMMON_AMQP_06_015: [The `putToken` method shall send this message over the `$cbs` sender link.]*/
             this._senderLink.send(amqpMessage, (err) => {
-              //
-              // Sadness.  Something went wrong sending the put token.
-              //
-              // Find the operation in the outstanding array.  Remove it from the array since, well, it's not outstanding anymore.
-              // Since we may have arrived here asynchronously, we simply can't assume that it is the end of the array.  But,
-              // it's more likely near the end.
-              //
-              for (let i = this._putToken.outstandingPutTokens.length - 1; i >= 0; i--) {
-                if (this._putToken.outstandingPutTokens[i].correlationId === amqpMessage.properties.messageId) {
-                  const outStandingPutTokenInError = this._putToken.outstandingPutTokens[i];
-                  this._putToken.outstandingPutTokens.splice(i, 1);
-                  //
-                  // This was the last outstanding put token.  No point in having a timer around trying to time nothing out.
-                  //
-                  if (this._putToken.outstandingPutTokens.length === 0) {
-                    clearTimeout(this._putToken.timeoutTimer);
+              if (err) {
+                // Find the operation in the outstanding array.  Remove it from the array since, well, it's not outstanding anymore.
+                // Since we may have arrived here asynchronously, we simply can't assume that it is the end of the array.  But,
+                // it's more likely near the end.
+                for (let i = this._putToken.outstandingPutTokens.length - 1; i >= 0; i--) {
+                  if (this._putToken.outstandingPutTokens[i].correlationId === amqpMessage.properties.messageId) {
+                    const outStandingPutTokenInError = this._putToken.outstandingPutTokens[i];
+                    this._putToken.outstandingPutTokens.splice(i, 1);
+                    //
+                    // This was the last outstanding put token.  No point in having a timer around trying to time nothing out.
+                    //
+                    if (this._putToken.outstandingPutTokens.length === 0) {
+                      clearTimeout(this._putToken.timeoutTimer);
+                    }
+                    /*Codes_SRS_NODE_COMMON_AMQP_06_006: [The `putToken` method shall call `putTokenCallback` (if supplied) if the `send` generates an error such that no response from the service will be forthcoming.]*/
+                    outStandingPutTokenInError.putTokenCallback(err);
+                    break;
                   }
-                  /*Codes_SRS_NODE_COMMON_AMQP_06_006: [The `putToken` method shall call `putTokenCallback` (if supplied) if the `send` generates an error such that no response from the service will be forthcoming.]*/
-                  outStandingPutTokenInError.putTokenCallback(err);
-                  break;
                 }
               }
             });
           }
         },
         detaching: {
-          _onEnter: () => {
+          _onEnter: (callback, err) => {
             this._senderLink.detach();
             this._receiverLink.detach();
-            this._fsm.transition('detached');
+            this._fsm.transition('detached', callback, err);
           },
           '*': (callback) => this._fsm.deferUntilTransition('detached')
         }

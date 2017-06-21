@@ -129,23 +129,32 @@ export class Amqp {
           attachSenderLink: (endpoint, linkOptions, callback) => {
             this._fsm.handle('connect', (err) => {
               if (err) {
-                callback(err)
+                callback(err);
               } else {
                 this._fsm.handle('attachSenderLink', endpoint, linkOptions, callback);
               }
-            })
+            });
           },
           attachReceiverLink: (endpoint, linkOptions, callback) => {
             this._fsm.handle('connect', (err) => {
               if (err) {
-                callback(err)
+                callback(err);
               } else {
                 this._fsm.handle('attachReceiverLink', endpoint, linkOptions, callback);
               }
-            })
+            });
           },
           detachSenderLink: (endpoint, callback) => this._safeCallback(callback),
           detachReceiverLink: (endpoint, callback) => this._safeCallback(callback),
+          initializeCBS: (callback) => {
+            this._fsm.handle('connect', (err) => {
+              if (err) {
+                callback(err);
+              } else {
+                this._fsm.handle('initializeCBS', callback);
+              }
+            });
+          },
           '*': () => this._fsm.deferUntilTransition('connected')
         },
         connecting: {

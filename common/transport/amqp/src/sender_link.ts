@@ -18,8 +18,6 @@ export class SenderLink extends EventEmitter implements AmqpLink {
     message: Message,
     callback: (err?: Error, result?: results.MessageEnqueued) => void
   }[];
-  private _attachError: Error;
-  private _attachCallback: (err?: Error) => void;
   private _detachHandler: (detachEvent: any) => void;
   private _errorHandler: (err: Error) => void;
 
@@ -49,9 +47,9 @@ export class SenderLink extends EventEmitter implements AmqpLink {
       initialState: 'detached',
       states: {
         detached: {
-          _onEnter: (err) => {
+          _onEnter: (callback, err) => {
             if (this._messageQueue.length > 0) {
-              let messageCallbackError = this._attachError || new Error('Link Detached'); // Do we need a better custom error here?
+              let messageCallbackError = err || new Error('Link Detached'); // Do we need a better custom error here?
 
               let toSend = this._messageQueue.shift();
               while (toSend) {
@@ -60,7 +58,9 @@ export class SenderLink extends EventEmitter implements AmqpLink {
               }
             }
 
-            if (err) {
+            if (callback) {
+              callback(err);
+            } else if (err) {
               this.emit('error', err);
             }
           },
@@ -77,18 +77,15 @@ export class SenderLink extends EventEmitter implements AmqpLink {
           _onEnter: (callback) => {
             this._attachLink((err) => {
               let newState = err ? 'detached' : 'attached';
-              this._attachError = err;
-              this._fsm.transition(newState, err);
-              if (callback) {
-                callback(err);
-              }
+              this._fsm.transition(newState, callback, err);
             });
           },
           detach: () => this._fsm.transition('detaching'),
           send: (message, callback) => pushToQueue(message, callback)
         },
         attached: {
-          _onEnter: () => {
+          _onEnter: (callback) => {
+            if (callback) callback();
             let toSend = this._messageQueue.shift();
             while (toSend) {
               this._fsm.handle('send', toSend.message, toSend.callback);
@@ -128,7 +125,7 @@ export class SenderLink extends EventEmitter implements AmqpLink {
               this._linkObject.forceDetach();
               this._linkObject = null;
             }
-            this._fsm.transition('detached', err);
+            this._fsm.transition('detached', null, err);
           },
           '*': () => this._fsm.deferUntilTransition('detached')
         }

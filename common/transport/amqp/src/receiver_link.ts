@@ -2,10 +2,9 @@ import * as machina from 'machina';
 import * as amqp10 from 'amqp10';
 import * as dbg from 'debug';
 import { EventEmitter } from 'events';
-import { Message, results, errors } from 'azure-iot-common';
+import { Message, results } from 'azure-iot-common';
 import { AmqpMessage } from './amqp_message';
 import { AmqpLink } from './amqp_link_interface';
-import { AmqpTransportError } from './amqp_common_errors';
 
 const debug = dbg('ReceiverLink');
 
@@ -110,7 +109,7 @@ export class ReceiverLink  extends EventEmitter implements AmqpLink {
           },
           attach: (callback) => {
             if (callback) {
-              return callback()
+              return callback();
             }
           },
           detach: () => this._fsm.transition('detaching'),
