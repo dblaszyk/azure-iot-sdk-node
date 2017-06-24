@@ -9,7 +9,7 @@ import { SenderLink } from './sender_link';
 import { ReceiverLink } from './receiver_link';
 
 /**
- * @class      module:azure-iot-amqp-base.PutTokenOperation
+ * @interface  module:azure-iot-amqp-base.PutTokenOperation
  * @classdesc  Describes a "put token" operation state: "put-token" operations are used to renew the CBS token and stay connected.
  *
  * @property   {Function}   putTokenCallback       The callback to be invoked on termination of the put token operation.
@@ -22,7 +22,7 @@ import { ReceiverLink } from './receiver_link';
  *                                                 correlation id.  This id is a uuid.
  *
  */
-class PutTokenOperation {
+interface PutTokenOperation {
   putTokenCallback: (err: Error | null, result?: any) => void;
   expirationTime: number;
   correlationId: string;
@@ -57,12 +57,18 @@ export class ClaimsBasedSecurityAgent extends EventEmitter {
   private _senderLink: SenderLink;
   private _receiverLink: ReceiverLink;
   private _putToken: PutTokenStatus = new PutTokenStatus();
+  private _putTokenQueue: {
+    audience: string,
+    token: string,
+    callback: (err?: Error) => void
+  }[];
 
   constructor(amqp10Client: amqp10.AmqpClient) {
     super();
     this._amqp10Client = amqp10Client;
     this._senderLink = new SenderLink(ClaimsBasedSecurityAgent._putTokenSendingEndpoint, { encoder: (body) => body }, this._amqp10Client);
     this._receiverLink = new ReceiverLink(ClaimsBasedSecurityAgent._putTokenReceivingEndpoint, null, this._amqp10Client);
+    this._putTokenQueue = [];
     this._fsm = new machina.Fsm({
       initialState: 'detached',
       states: {
@@ -70,12 +76,24 @@ export class ClaimsBasedSecurityAgent extends EventEmitter {
           _onEnter: (callback, err) => {
             if (callback) {
               callback(err);
-            } else if (err) {
-              this.emit('error', err);
+            }
+            let tokenOperation = this._putTokenQueue.shift();
+            while (tokenOperation) {
+              tokenOperation.callback(err);
+              tokenOperation = this._putTokenQueue.shift();
             }
           },
           attach: (callback) => {
             this._fsm.transition('attaching', callback);
+          },
+          detach: (callback) => callback(),
+          putToken: (audience, token, callback) => {
+            this._putTokenQueue.push({
+              audience: audience,
+              token: token,
+              callback: callback
+            });
+            this._fsm.transition('attaching');
           }
          },
         attaching: {
@@ -118,16 +136,29 @@ export class ClaimsBasedSecurityAgent extends EventEmitter {
                 });
               }
             });
+          },
+          detach: (callback) => this._fsm.transition('detaching', callback),
+          putToken: (audience, token, callback) => {
+            this._putTokenQueue.push({
+              audience: audience,
+              token: token,
+              callback: callback
+            });
           }
          },
         attached: {
           _onEnter: (callback) => {
             if (callback) {
-              return callback();
+              callback();
+            }
+            let tokenOperation = this._putTokenQueue.shift();
+            while (tokenOperation) {
+              this._fsm.handle('putToken', tokenOperation.audience, tokenOperation.token, tokenOperation.callback);
+              tokenOperation = this._putTokenQueue.shift();
             }
           },
           attach: (callback) => callback(),
-          detach: () => this._fsm.transition('detaching'),
+          detach: (callback) => this._fsm.transition('detaching', callback),
           putToken: (audience, token, putTokenCallback) => {
             /*Codes_SRS_NODE_COMMON_AMQP_06_005: [The `putToken` method shall construct an amqp message that contains the following application properties:
             'operation': 'put-token'
@@ -209,7 +240,7 @@ export class ClaimsBasedSecurityAgent extends EventEmitter {
   }
 
   detach(callback: (err?: Error) => void): void {
-    this._fsm.handle('attach', callback);
+    this._fsm.handle('detach', callback);
   }
 
   /**
@@ -222,12 +253,10 @@ export class ClaimsBasedSecurityAgent extends EventEmitter {
    * @param {Function}   putTokenCallback  Called when the put token operation terminates.
    */
   putToken(audience: string, token: string, putTokenCallback: (err?: Error) => void): void {
-    /*Codes_SRS_NODE_COMMON_AMQP_06_016: [The `putToken` method shall throw a ReferenceError if the `audience` argument is falsy.]*/
     if (!audience) {
       throw new ReferenceError('audience cannot be \'' + audience + '\'');
     }
 
-    /*Codes_SRS_NODE_COMMON_AMQP_06_017: [The `putToken` method shall throw a ReferenceError if the `token` argument is falsy.]*/
     if (!token) {
       throw new ReferenceError('token cannot be \'' + token + '\'');
     }

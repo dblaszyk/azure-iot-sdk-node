@@ -133,24 +133,30 @@ var AmqpMessage = require('../lib/amqp_message.js').AmqpMessage;
     });
 
     describe('events', function() {
-      describe('error', function() {});
-      describe('detached', function() {
-        it('returns to the detached state when the detached event is received', function(testCallback) {
-          var fakeLinkObj = new EventEmitter();
-          fakeLinkObj.forceDetach = function() {};
-          var fakeError = new Error('link is now detached');
-          var fakeAmqp10Client = new EventEmitter();
-          fakeAmqp10Client[testConfig.amqp10Method] = sinon.stub().resolves(fakeLinkObj);
+      [
+        { name: 'errorReceived', payload: new Error('fake error') },
+        { name: 'detached', payload: { closed: true, error: new Error('fake error') } }
+      ].forEach(function(errorEvent) {
+        describe(errorEvent.name, function() {
+          it('returns to the detached state when the ' + errorEvent.name + ' event is received and emits an error if any', function(testCallback) {
+            var fakeLinkObj = new EventEmitter();
+            fakeLinkObj.forceDetach = function() {};
+            var fakeAmqp10Client = new EventEmitter();
+            fakeAmqp10Client[testConfig.amqp10Method] = sinon.stub().resolves(fakeLinkObj);
 
-          var link = new testConfig.linkClass('link', null, fakeAmqp10Client);
-          link.attach(function() {
-            // now successfully attached
-            assert.isTrue(fakeAmqp10Client[testConfig.amqp10Method].calledOnce);
-            fakeLinkObj.emit('detached', { });
-            // now detached
+            var link = new testConfig.linkClass('link', null, fakeAmqp10Client);
+            link.on('error', function (err) {
+              assert.strictEqual(err.message, 'fake error');
+            });
             link.attach(function() {
-              assert.isTrue(fakeAmqp10Client[testConfig.amqp10Method].calledTwice);
-              testCallback();
+              // now successfully attached
+              assert.isTrue(fakeAmqp10Client[testConfig.amqp10Method].calledOnce);
+              fakeLinkObj.emit(errorEvent.name, errorEvent.payload);
+              // now detached
+              link.attach(function() {
+                assert.isTrue(fakeAmqp10Client[testConfig.amqp10Method].calledTwice);
+                testCallback();
+              });
             });
           });
         });

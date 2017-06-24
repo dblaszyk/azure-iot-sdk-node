@@ -64,9 +64,7 @@ export class SenderLink extends EventEmitter implements AmqpLink {
               this.emit('error', err);
             }
           },
-          attach: (callback) => {
-            this._fsm.transition('attaching', callback);
-          },
+          attach: (callback) => this._fsm.transition('attaching', callback),
           detach: () => { return; },
           send: (message, callback) => {
             pushToQueue(message, callback);
@@ -95,11 +93,7 @@ export class SenderLink extends EventEmitter implements AmqpLink {
           _onExit: () => {
             this._linkObject.removeListener('detached', this._detachHandler);
           },
-          attach: (callback) => {
-            if (callback) {
-              callback();
-            }
-          },
+          attach: (callback) => callback(),
           detach: () => this._fsm.transition('detaching'),
           send: (message, callback) => {
             /*Codes_SRS_NODE_COMMON_AMQP_16_011: [All methods should treat the `done` callback argument as optional and not throw if it is not passed as argument.]*/

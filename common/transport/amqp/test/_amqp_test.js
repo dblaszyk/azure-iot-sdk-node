@@ -6,6 +6,7 @@
 var Promise = require('bluebird');
 var assert = require('chai').assert;
 var sinon = require('sinon');
+var AmqpMessage = require('../lib/amqp_message.js').AmqpMessage;
 var Amqp = require('../lib/amqp.js').Amqp;
 var ReceiverLink = require('../lib/receiver_link.js').ReceiverLink;
 var results = require('azure-iot-common').results;
@@ -338,59 +339,14 @@ describe('Amqp', function () {
     });
   });
 
-  describe('#initializeCBS', function() {
-    /*Tests_SRS_NODE_COMMON_AMQP_06_019: [If given as an argument, the `initializeCBS` method shall call `initializeCBSCallback` with a standard `Error` object if the link/listener establishment fails.]*/
-    it('Calls initializeCBSCallback with an error if can NOT establish a sender link', function(testCallback) {
-      var amqp = new Amqp();
-      sinon.stub(amqp._amqp, 'connect').resolves('connected');
-      var testError = new Error();
-      sinon.stub(amqp._amqp, 'createSender').rejects(testError);
-      amqp.initializeCBS(function(err) {
-        assert.strictEqual(err, testError);
-        testCallback();
-      });
-    });
-
-    /*Tests_SRS_NODE_COMMON_AMQP_06_019: [If given as an argument, the `initializeCBS` method shall call `initializeCBSCallback` with a standard `Error` object if the link/listener establishment fails.]*/
-    it('Calls initializeCBSCallback with an error if can NOT establish a receiver link', function(testCallback) {
-      var amqp = new Amqp();
-      var testError = new Error();
-      var fakeSender = new EventEmitter();
-      fakeSender.forceDetach = function () {};
-      sinon.stub(amqp._amqp, 'connect').resolves('connected');      
-      sinon.stub(amqp._amqp, 'createSender').resolves(fakeSender);
-      sinon.stub(amqp._amqp, 'createReceiver').rejects(testError);
-      
-      amqp.initializeCBS(function(err) {
-        assert.strictEqual(err, testError);
-        testCallback();
-      });
-    });
-
-    /*Tests_SRS_NODE_COMMON_AMQP_06_020: [If given as an argument, the `initializeCBS` method shall call `initializeCBSCallback` with a null error object if successful.]*/
-    it('Calls initializeCBSCallback with no error if successful', function(testCallback) {
-      var amqp = new Amqp();
-      var fakeSender = new EventEmitter();
-      fakeSender.forceDetach = function () {};
-      var fakeReceiver = new EventEmitter();
-      fakeReceiver.forceDetach = function () {};
-      sinon.stub(amqp._amqp, 'connect').resolves('connected');      
-      sinon.stub(amqp._amqp, 'createSender').resolves(fakeSender);
-      sinon.stub(amqp._amqp, 'createReceiver').resolves(fakeReceiver);
-
-      amqp.initializeCBS(function(err) {
-        assert.isUndefined(err);
-        testCallback();
-      });
-    });
-
+  describe('initializeCBS', function() {
     it('tries to connect the client if it is disconnected', function(testCallback) {
       var amqp = new Amqp();
       var fakeSender = new EventEmitter();
       fakeSender.forceDetach = function () {};
       var fakeReceiver = new EventEmitter();
       fakeReceiver.forceDetach = function () {};
-      sinon.stub(amqp._amqp, 'connect').resolves('connected');      
+      sinon.stub(amqp._amqp, 'connect').resolves('connected');
       sinon.stub(amqp._amqp, 'createSender').resolves(fakeSender);
       sinon.stub(amqp._amqp, 'createReceiver').resolves(fakeReceiver);
 
@@ -401,7 +357,45 @@ describe('Amqp', function () {
     });
   });
 
-  describe('#putToken', function() {
+  describe('putToken', function() {
+    it('tries to connect the client and initialize the CBS endpoints if necessary', function(testCallback) {
+      var fakeUuid = uuid.v4();
+      var uuidStub = sinon.stub(uuid,'v4');
+      uuidStub.onCall(0).returns(fakeUuid);
+
+      var amqp = new Amqp();
+      var fakeReceiver = new EventEmitter();
+      fakeReceiver.accept = sinon.stub();
+      fakeReceiver.forceDetach = function () {};
+
+      var fakeSender = new EventEmitter();
+      fakeSender.send = function() {
+        return new Promise(function (resolve, reject) {
+          resolve();
+          fakeReceiver.emit('message', responseMessage);
+        });
+      };
+      fakeSender.forceDetach = function () {};
+
+      var responseMessage = new AmqpMessage();
+      responseMessage.properties = {};
+      responseMessage.applicationProperties = {};
+      responseMessage.properties.correlationId = fakeUuid;
+      responseMessage.applicationProperties['status-code'] = 200;
+
+      sinon.stub(amqp._amqp, 'connect').resolves('connected');
+      sinon.stub(amqp._amqp, 'createSender').resolves(fakeSender);
+      sinon.stub(amqp._amqp, 'createReceiver').resolves(fakeReceiver);
+
+      amqp.putToken('audience', 'token', function(err) {
+        uuid.v4.restore();
+        assert.isNull(err);
+        assert(amqp._amqp.connect.calledOnce);
+        assert(amqp._amqp.createSender.calledWith('$cbs'));
+        assert(amqp._amqp.createReceiver.calledWith('$cbs'));
+        testCallback();
+      });
+    });
   });
 
   describe('Links', function() {
@@ -413,8 +407,8 @@ describe('Amqp', function () {
 
     var fake_generic_endpoint = 'fake_generic_endpoint';
     [
-      {amqpFunc: 'attachSenderLink', amqp10Func: 'createSender', privateLinkArray: '_senders', fakeLinkObject: createFakeLink()} //,
-      // {amqpFunc: 'attachReceiverLink', amqp10Func: 'createReceiver', privateLinkArray: '_receivers', fakeLinkObject: createFakeLink()}
+      { amqpFunc: 'attachSenderLink', amqp10Func: 'createSender', privateLinkArray: '_senders', fakeLinkObject: createFakeLink() },
+      { amqpFunc: 'attachReceiverLink', amqp10Func: 'createReceiver', privateLinkArray: '_receivers', fakeLinkObject: createFakeLink() }
     ].forEach(function(testConfig) {
       describe('#' + testConfig.amqpFunc, function() {
         /*Tests_SRS_NODE_COMMON_AMQP_16_012: [The `attachSenderLink` method shall throw a ReferenceError if the `endpoint` argument is falsy.]*/

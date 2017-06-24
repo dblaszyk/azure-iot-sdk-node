@@ -10,6 +10,114 @@ var AmqpMessage = require('../lib/amqp_message.js').AmqpMessage;
 var CBS = require('../lib/amqp_cbs.js').ClaimsBasedSecurityAgent;
 
 describe('ClaimsBasedSecurityAgent', function() {
+  describe('attach', function() {
+    /*Tests_SRS_NODE_COMMON_AMQP_06_019: [If given as an argument, the `initializeCBS` method shall call `initializeCBSCallback` with a standard `Error` object if the link/listener establishment fails.]*/
+    it('Calls its callback with an error if can NOT establish a sender link', function(testCallback) {
+      var testError = new Error();
+      var fakeAmqpClient = new EventEmitter();
+      fakeAmqpClient.createSender = sinon.stub().rejects(testError);
+
+      var cbs = new CBS(fakeAmqpClient);
+      cbs.attach(function(err) {
+        assert.strictEqual(err, testError);
+        testCallback();
+      });
+    });
+
+    /*Tests_SRS_NODE_COMMON_AMQP_06_019: [If given as an argument, the `initializeCBS` method shall call `initializeCBSCallback` with a standard `Error` object if the link/listener establishment fails.]*/
+    it('Calls its callback with an error if can NOT establish a receiver link', function(testCallback) {
+      var testError = new Error();
+      var fakeAmqpClient = new EventEmitter();
+      var fakeSender = new EventEmitter();
+      fakeSender.forceDetach = function () {};
+      fakeAmqpClient.createSender = sinon.stub().resolves(fakeSender);
+      fakeAmqpClient.createReceiver = sinon.stub().rejects(testError);
+
+      var cbs = new CBS(fakeAmqpClient);
+      cbs.attach(function(err) {
+        assert.strictEqual(err, testError);
+        testCallback();
+      });
+    });
+
+    /*Tests_SRS_NODE_COMMON_AMQP_06_020: [If given as an argument, the `initializeCBS` method shall call `initializeCBSCallback` with a null error object if successful.]*/
+    it('Calls its callback with no error if successful', function(testCallback) {
+      var fakeAmqpClient = new EventEmitter();
+      var fakeSender = new EventEmitter();
+      fakeSender.forceDetach = function () {};
+      var fakeReceiver = new EventEmitter();
+      fakeReceiver.forceDetach = function () {};
+      fakeAmqpClient.createSender = sinon.stub().resolves(fakeSender);
+      fakeAmqpClient.createReceiver = sinon.stub().resolves(fakeReceiver);
+
+      var cbs = new CBS(fakeAmqpClient);
+      cbs.attach(function(err) {
+        assert.isUndefined(err);
+        testCallback();
+      });
+    });
+
+    it('calls the callback immediately if links are already attached', function(testCallback) {
+      var fakeAmqpClient = new EventEmitter();
+      fakeAmqpClient.createReceiver = sinon.stub().resolves(new EventEmitter()),
+      fakeAmqpClient.createSender = sinon.stub().resolves(new EventEmitter())
+
+      var cbs = new CBS(fakeAmqpClient);
+      cbs.attach(function() {
+        assert(fakeAmqpClient.createReceiver.calledOnce);
+        assert(fakeAmqpClient.createReceiver.calledOnce);
+        cbs.attach(function() {
+          assert(fakeAmqpClient.createReceiver.calledOnce);
+          assert(fakeAmqpClient.createReceiver.calledOnce);
+          testCallback();
+        });
+      });
+    });
+  });
+
+  describe('detach', function() {
+    it('calls the callback immediately if already detached', function(testCallback) {
+      var cbs = new CBS({});
+      cbs.detach(testCallback);
+    });
+
+    it('detaches the links if they are attached', function(testCallback) {
+      var fakeAmqpClient = new EventEmitter();
+      var fakeSender = new EventEmitter();
+      fakeSender.forceDetach = sinon.stub();
+      var fakeReceiver = new EventEmitter();
+      fakeReceiver.forceDetach = sinon.stub();
+      fakeAmqpClient.createSender = sinon.stub().resolves(fakeSender);
+      fakeAmqpClient.createReceiver = sinon.stub().resolves(fakeReceiver);
+
+      var cbs = new CBS(fakeAmqpClient);
+      cbs.attach(function() {
+        assert(fakeAmqpClient.createSender.calledOnce);
+        assert(fakeAmqpClient.createReceiver.calledOnce);
+        cbs.detach(function(err) {
+          assert.isUndefined(err);
+          assert(fakeSender.forceDetach.calledOnce);
+          assert(fakeReceiver.forceDetach.calledOnce);
+          testCallback();
+        });
+      });
+    });
+
+    it('calls its callback if links are being attached', function(testCallback) {
+      var fakeAmqpClient = new EventEmitter();
+      fakeAmqpClient.createSender = sinon.stub().resolves(new EventEmitter());
+      fakeAmqpClient.createReceiver = sinon.stub();
+
+      var cbs = new CBS(fakeAmqpClient);
+      cbs.attach(function() {});
+      cbs.detach(function(err) {
+        assert.isUndefined(err);
+        assert(fakeAmqpClient.createSender.calledOnce);
+        testCallback();
+      });
+    });
+  });
+
   describe('putToken', function() {
     [undefined, null, ''].forEach(function (badAudience){
       /*Tests_SRS_NODE_COMMON_AMQP_06_016: [The `putToken` method shall throw a ReferenceError if the `audience` argument is falsy.]*/
@@ -31,8 +139,97 @@ describe('ClaimsBasedSecurityAgent', function() {
       });
     });
 
-    // it('attaches the CBS links if necessary', function(testCallback) {
-    // });
+    it('attaches the CBS links if necessary and then succeeds', function(testCallback) {
+      var fakeUuid = uuid.v4();
+      var uuidStub = sinon.stub(uuid,'v4');
+      uuidStub.onCall(0).returns(fakeUuid);
+
+      var fakeAmqpClient = new EventEmitter();
+      var fakeSender = new EventEmitter();
+      fakeSender.send = function() {
+        return new Promise(function (resolve, reject) {
+          resolve();
+          var responseMessage = new AmqpMessage();
+          responseMessage.properties = {};
+          responseMessage.applicationProperties = {};
+          responseMessage.properties.correlationId = fakeUuid;
+          responseMessage.applicationProperties['status-code'] = 200;
+          fakeReceiver.emit('message', responseMessage);
+        });
+      };
+      fakeSender.forceDetach = sinon.stub();
+
+      var fakeReceiver = new EventEmitter();
+      fakeReceiver.accept = sinon.stub();
+      fakeReceiver.forceDetach = sinon.stub();
+      fakeAmqpClient.createSender = sinon.stub().resolves(fakeSender);
+      fakeAmqpClient.createReceiver = sinon.stub().resolves(fakeReceiver);
+
+      var cbs = new CBS(fakeAmqpClient);
+      cbs.putToken('audience', 'token', function(err) {
+        uuid.v4.restore();
+        assert(fakeAmqpClient.createSender.calledOnce);
+        assert(fakeAmqpClient.createReceiver.calledOnce);
+        testCallback();
+      });
+    });
+
+    it('fails if it cannot attach the CBS links', function(testCallback) {
+      var fakeError = new Error('fake error');
+      var fakeAmqpClient = new EventEmitter();
+      var fakeSender = new EventEmitter();
+      fakeSender.forceDetach = sinon.stub();
+
+      var fakeReceiver = new EventEmitter();
+      fakeReceiver.forceDetach = sinon.stub();
+      fakeAmqpClient.createSender = sinon.stub().rejects(fakeError);
+      fakeAmqpClient.createReceiver = sinon.stub().resolves(fakeReceiver);
+
+      var cbs = new CBS(fakeAmqpClient);
+      cbs.putToken('audience', 'token', function(err) {
+        assert.strictEqual(err, fakeError);
+        testCallback();
+      });
+    });
+
+    it('succeeds even if called while the link are being attached', function(testCallback) {
+      var fakeUuid = uuid.v4();
+      var uuidStub = sinon.stub(uuid,'v4');
+      uuidStub.onCall(0).returns(fakeUuid);
+      var fakeAmqpClient = new EventEmitter();
+      var fakeSender = new EventEmitter();
+      fakeSender.send = function() {
+        return new Promise(function (resolve, reject) {
+          resolve();
+          var responseMessage = new AmqpMessage();
+          responseMessage.properties = {};
+          responseMessage.applicationProperties = {};
+          responseMessage.properties.correlationId = fakeUuid;
+          responseMessage.applicationProperties['status-code'] = 200;
+          fakeReceiver.emit('message', responseMessage);
+        });
+      };
+      fakeSender.forceDetach = sinon.stub();
+
+      var fakeReceiver = new EventEmitter();
+      fakeReceiver.accept = sinon.stub();
+      fakeReceiver.forceDetach = sinon.stub();
+      var unlockResolve;
+      fakeAmqpClient.createSender = function() {
+        return new Promise(function (resolve) {
+          unlockResolve = resolve;
+        });
+      };
+      fakeAmqpClient.createReceiver = sinon.stub().resolves(fakeReceiver);
+
+      var cbs = new CBS(fakeAmqpClient);
+      cbs.attach();
+      cbs.putToken('audience', 'token', function(err) {
+        uuid.v4.restore();
+        testCallback();
+      });
+      unlockResolve(fakeSender);
+    });
 
     it('creates a timer if this is the first pending put token operation', function(testCallback) {
       this.clock = sinon.useFakeTimers();

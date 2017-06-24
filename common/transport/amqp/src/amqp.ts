@@ -155,6 +155,15 @@ export class Amqp {
               }
             });
           },
+          putToken: (audience, token, callback) => {
+            this._fsm.handle('initializeCBS', (err) => {
+              if (err) {
+                callback(err);
+              } else {
+                this._fsm.handle('putToken', audience, token, callback);
+              }
+            });
+          },
           '*': () => this._fsm.deferUntilTransition('connected')
         },
         connecting: {
@@ -249,10 +258,6 @@ export class Amqp {
             }
           },
           detachSenderLink: (endpoint: string, detachCallback: GenericAmqpBaseCallback): void => {
-            /*Codes_SRS_NODE_COMMON_AMQP_16_022: [The `detachSenderLink` method shall throw a ReferenceError if the `endpoint` argument is falsy.]*/
-            if (!endpoint) {
-              throw new ReferenceError('endpoint cannot be \'' + endpoint + '\'');
-            }
             this._detachLink(this._senders[endpoint], (err?) => {
               delete(this._senders[endpoint]);
               detachCallback(err);
