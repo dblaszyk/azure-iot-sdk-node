@@ -10,7 +10,7 @@ var AmqpMessage = require('../lib/amqp_message.js').AmqpMessage;
 var CBS = require('../lib/amqp_cbs.js').ClaimsBasedSecurityAgent;
 
 describe('ClaimsBasedSecurityAgent', function() {
-  describe('attach', function() {
+  describe('#attach', function() {
     /*Tests_SRS_NODE_COMMON_AMQP_06_019: [If given as an argument, the `initializeCBS` method shall call `initializeCBSCallback` with a standard `Error` object if the link/listener establishment fails.]*/
     it('Calls its callback with an error if can NOT establish a sender link', function(testCallback) {
       var testError = new Error();
@@ -75,10 +75,12 @@ describe('ClaimsBasedSecurityAgent', function() {
     });
   });
 
-  describe('detach', function() {
-    it('calls the callback immediately if already detached', function(testCallback) {
+  describe('#detach', function() {
+    it('Returns immediately and does not throw if already detached', function() {
       var cbs = new CBS({});
-      cbs.detach(testCallback);
+      assert.doesNotThrow(function () {
+        cbs.detach();
+      });
     });
 
     it('detaches the links if they are attached', function(testCallback) {
@@ -94,31 +96,34 @@ describe('ClaimsBasedSecurityAgent', function() {
       cbs.attach(function() {
         assert(fakeAmqpClient.createSender.calledOnce);
         assert(fakeAmqpClient.createReceiver.calledOnce);
-        cbs.detach(function(err) {
-          assert.isUndefined(err);
-          assert(fakeSender.forceDetach.calledOnce);
-          assert(fakeReceiver.forceDetach.calledOnce);
-          testCallback();
-        });
-      });
-    });
-
-    it('calls its callback if links are being attached', function(testCallback) {
-      var fakeAmqpClient = new EventEmitter();
-      fakeAmqpClient.createSender = sinon.stub().resolves(new EventEmitter());
-      fakeAmqpClient.createReceiver = sinon.stub();
-
-      var cbs = new CBS(fakeAmqpClient);
-      cbs.attach(function() {});
-      cbs.detach(function(err) {
-        assert.isUndefined(err);
-        assert(fakeAmqpClient.createSender.calledOnce);
+        cbs.detach();
+        assert(fakeSender.forceDetach.calledOnce);
+        assert(fakeReceiver.forceDetach.calledOnce);
         testCallback();
       });
     });
+
+    it('works if called when links are being attached', function(testCallback) {
+      var fakeAmqpClient = new EventEmitter();
+      var fakeSender = new EventEmitter();
+      fakeSender.forceDetach = sinon.stub();
+      fakeAmqpClient.createSender = sinon.stub().resolves(fakeSender);
+      fakeAmqpClient.createReceiver = sinon.stub();
+
+      var cbs = new CBS(fakeAmqpClient);
+      cbs._senderLink._fsm.on('transition', function (data) {
+        if (data.toState === 'attached') {
+          cbs.detach();
+          assert(fakeAmqpClient.createSender.calledOnce);
+          assert(fakeSender.forceDetach.calledOnce);
+          testCallback();
+        }
+      })
+      cbs.attach(function() {});
+    });
   });
 
-  describe('putToken', function() {
+  describe('#putToken', function() {
     [undefined, null, ''].forEach(function (badAudience){
       /*Tests_SRS_NODE_COMMON_AMQP_06_016: [The `putToken` method shall throw a ReferenceError if the `audience` argument is falsy.]*/
       it('throws if audience is \'' + badAudience +'\'', function () {

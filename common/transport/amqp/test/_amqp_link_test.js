@@ -16,7 +16,7 @@ var AmqpMessage = require('../lib/amqp_message.js').AmqpMessage;
   }
 ].forEach(function(testConfig) {
   describe(testConfig.linkClass.name, function() {
-    describe('constructor', function() {
+    describe('#constructor', function() {
       it('inherits from EventEmitter', function() {
         var link = new testConfig.linkClass('link', null, {});
         assert.instanceOf(link, EventEmitter);
@@ -34,7 +34,7 @@ var AmqpMessage = require('../lib/amqp_message.js').AmqpMessage;
       });
     });
 
-    describe('attach', function() {
+    describe('#attach', function() {
       it('attaches a new link using the amqp10.AmqpClient object', function(testCallback) {
         var fakeLinkAddress = 'link';
         var fakeLinkOptions = {};
@@ -108,7 +108,7 @@ var AmqpMessage = require('../lib/amqp_message.js').AmqpMessage;
       });
     });
 
-    describe('detach', function() {
+    describe('#detach', function() {
       it('detaches the link if it is attached', function(testCallback) {
         var fakeLinkObj = new EventEmitter();
         fakeLinkObj.forceDetach = sinon.stub();
@@ -129,6 +129,23 @@ var AmqpMessage = require('../lib/amqp_message.js').AmqpMessage;
 
         var link = new testConfig.linkClass('link', {}, fakeAmqp10Client);
         link.detach();
+      });
+
+      it('returns to the detached state if called while attaching', function(testCallback) {
+        var fakeLinkObj = new EventEmitter();
+        fakeLinkObj.forceDetach = sinon.stub();
+        var fakeAmqp10Client = new EventEmitter();
+        fakeAmqp10Client[testConfig.amqp10Method] = sinon.stub().resolves(fakeLinkObj);
+
+        var link = new testConfig.linkClass('link', {}, fakeAmqp10Client);
+        link._fsm.on('transition', function (data) {
+          if (data.toState === 'attaching') {
+            link.detach();
+          } else if (data.toState === 'detached') {
+            testCallback();
+          }
+        });
+        link.attach(function() {});
       });
     });
 

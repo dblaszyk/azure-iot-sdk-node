@@ -161,6 +161,16 @@ describe('Amqp', function () {
         });
       });
     });
+
+    it('immediately calls the callback if already disconnected', function(testCallback) {
+      var amqp = new Amqp();
+      sinon.stub(amqp._amqp, 'connect').rejects(new Error('connect should not have been called'));
+      sinon.stub(amqp._amqp, 'disconnect').rejects(new Error('disconnect should not have been called'));
+      amqp.disconnect(function(err) {
+        assert.isNull(err);
+        testCallback();
+      });
+    });
   });
 
   describe('#send', function() {
@@ -227,10 +237,19 @@ describe('Amqp', function () {
 
       amqp.connect('uri', null, function() {
         amqp.send(new Message('message'), endpointName, 'deviceId', function(err, result) {
-          if (!err) {
+          if (err) {
+            testCallback(err);
+          } else {
             assert.instanceOf(result, results.MessageEnqueued);
+            assert(amqp._amqp.createSender.calledOnce);
+            amqp.send(new Message('message'), endpointName, 'deviceId', function(err, result) {
+              if (!err) {
+                assert.instanceOf(result, results.MessageEnqueued);
+                assert(amqp._amqp.createSender.calledOnce);
+              }
+              testCallback(err);
+            });
           }
-          testCallback(err);
         });
       });
     });
@@ -339,7 +358,7 @@ describe('Amqp', function () {
     });
   });
 
-  describe('initializeCBS', function() {
+  describe('#initializeCBS', function() {
     it('tries to connect the client if it is disconnected', function(testCallback) {
       var amqp = new Amqp();
       var fakeSender = new EventEmitter();
@@ -355,9 +374,20 @@ describe('Amqp', function () {
         testCallback();
       });
     });
+
+    it('calls the callback with an error if the client cannot be connected', function (testCallback) {
+      var amqp = new Amqp();
+      var fakeError = new Error('fake error');
+      sinon.stub(amqp._amqp, 'connect').rejects(fakeError);
+
+      amqp.initializeCBS(function(err) {
+        assert.strictEqual(err, fakeError);
+        testCallback();
+      });
+    });
   });
 
-  describe('putToken', function() {
+  describe('#putToken', function() {
     it('tries to connect the client and initialize the CBS endpoints if necessary', function(testCallback) {
       var fakeUuid = uuid.v4();
       var uuidStub = sinon.stub(uuid,'v4');
@@ -393,6 +423,46 @@ describe('Amqp', function () {
         assert(amqp._amqp.connect.calledOnce);
         assert(amqp._amqp.createSender.calledWith('$cbs'));
         assert(amqp._amqp.createReceiver.calledWith('$cbs'));
+        testCallback();
+      });
+    });
+
+    it('calls the callback with an error if the client cannot be connected', function (testCallback) {
+      var amqp = new Amqp();
+      var fakeError = new Error('fake error');
+      sinon.stub(amqp._amqp, 'connect').rejects(fakeError);
+      amqp.putToken('audience', 'token', function(err) {
+        assert.strictEqual(err, fakeError);
+        testCallback();
+      });
+    });
+
+    it('calls the callback with an error if the AMQP CBS sender link fails to attach', function (testCallback) {
+      var amqp = new Amqp();
+      var fakeError = new Error('fake error');
+      sinon.stub(amqp._amqp, 'connect').resolves();
+      var fakeReceiver = new EventEmitter();
+      fakeReceiver.forceDetach = function () {};
+      sinon.stub(amqp._amqp, 'createSender').rejects(fakeError);
+      sinon.stub(amqp._amqp, 'createReceiver').resolves(fakeReceiver);
+
+      amqp.putToken('audience', 'token', function(err) {
+        assert.strictEqual(err, fakeError);
+        testCallback();
+      });
+    });
+
+    it('calls the callback with an error if the AMQP CBS receiver link fails to attach', function (testCallback) {
+      var amqp = new Amqp();
+      var fakeError = new Error('fake error');
+      sinon.stub(amqp._amqp, 'connect').resolves();
+      var fakeSender = new EventEmitter();
+      fakeSender.forceDetach = function () {};
+      sinon.stub(amqp._amqp, 'createSender').resolves(fakeSender);
+      sinon.stub(amqp._amqp, 'createReceiver').rejects(fakeError);
+
+      amqp.putToken('audience', 'token', function(err) {
+        assert.strictEqual(err, fakeError);
         testCallback();
       });
     });
@@ -454,6 +524,17 @@ describe('Amqp', function () {
               assert.deepEqual(amqp._amqp[testConfig.amqp10Func].args[0][1], { fakeKey: 'fakeValue'});
               testCallback();
             });
+          });
+        });
+
+        it('calls the callback with an error if the client cannot be connected', function (testCallback) {
+          var amqp = new Amqp();
+          var fakeError = new Error('fake error');
+          sinon.stub(amqp._amqp, 'connect').rejects(fakeError);
+
+          amqp[testConfig.amqpFunc](fake_generic_endpoint, null, function(err) {
+            assert.strictEqual(err, fakeError);
+            testCallback();
           });
         });
 

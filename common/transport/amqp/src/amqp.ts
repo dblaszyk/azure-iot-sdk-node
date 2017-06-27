@@ -167,10 +167,8 @@ export class Amqp {
           '*': () => this._fsm.deferUntilTransition('connected')
         },
         connecting: {
-          connect: () => this._fsm.deferUntilTransition('connected'),
-          disconnect: (callback) => {
-            // code goes here.
-          },
+          connect: () => this._fsm.deferUntilTransition(),
+          disconnect: () => this._fsm.deferUntilTransition(),
           '*': () => this._fsm.deferUntilTransition('connected')
         },
         connected: {
@@ -329,10 +327,18 @@ export class Amqp {
     }
     this._receivers = {};
 
+    if (this._cbs) {
+      this._cbs.detach();
+    }
+
     /*Codes_SRS_NODE_COMMON_AMQP_16_004: [The disconnect method shall call the done callback when the application/service has been successfully disconnected from the service] */
     this._amqp.disconnect()
-              .then(() => this._safeCallback(done, null, new results.Disconnected()))
-              .catch((err) => this._safeCallback(done, err));
+              .then(() => {
+                this._safeCallback(done, null, new results.Disconnected());
+              })
+              .catch((err) => {
+                this._safeCallback(done, err);
+              });
   }
 
   /**

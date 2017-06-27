@@ -5,7 +5,7 @@ var SenderLink = require('../lib/sender_link.js').SenderLink;
 var AmqpMessage = require('../lib/amqp_message.js').AmqpMessage;
 
 describe('SenderLink', function() {
-  describe('attach', function() {
+  describe('#attach', function() {
     it('fails messages in the queue with its own error if the link cannot be attached', function (testCallback) {
       var fakeLinkObj = new EventEmitter();
       var fakeError = new Error('fake error');
@@ -38,7 +38,7 @@ describe('SenderLink', function() {
     });
   });
 
-  describe('send', function() {
+  describe('#send', function() {
     it('automatically attaches the link if it is detached', function(testCallback) {
       var fakeLinkObj = new EventEmitter();
       fakeLinkObj.send = sinon.stub().resolves();

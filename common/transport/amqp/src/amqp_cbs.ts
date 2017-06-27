@@ -86,7 +86,7 @@ export class ClaimsBasedSecurityAgent extends EventEmitter {
           attach: (callback) => {
             this._fsm.transition('attaching', callback);
           },
-          detach: (callback) => callback(),
+          detach: () => { return; },
           putToken: (audience, token, callback) => {
             this._putTokenQueue.push({
               audience: audience,
@@ -137,7 +137,7 @@ export class ClaimsBasedSecurityAgent extends EventEmitter {
               }
             });
           },
-          detach: (callback) => this._fsm.transition('detaching', callback),
+          detach: () => this._fsm.transition('detaching'),
           putToken: (audience, token, callback) => {
             this._putTokenQueue.push({
               audience: audience,
@@ -158,7 +158,7 @@ export class ClaimsBasedSecurityAgent extends EventEmitter {
             }
           },
           attach: (callback) => callback(),
-          detach: (callback) => this._fsm.transition('detaching', callback),
+          detach: () => this._fsm.transition('detaching'),
           putToken: (audience, token, putTokenCallback) => {
             /*Codes_SRS_NODE_COMMON_AMQP_06_005: [The `putToken` method shall construct an amqp message that contains the following application properties:
             'operation': 'put-token'
@@ -224,10 +224,10 @@ export class ClaimsBasedSecurityAgent extends EventEmitter {
           }
         },
         detaching: {
-          _onEnter: (callback, err) => {
+          _onEnter: (forwardedCallback, err) => {
             this._senderLink.detach();
             this._receiverLink.detach();
-            this._fsm.transition('detached', callback, err);
+            this._fsm.transition('detached', forwardedCallback, err);
           },
           '*': (callback) => this._fsm.deferUntilTransition('detached')
         }
@@ -239,8 +239,8 @@ export class ClaimsBasedSecurityAgent extends EventEmitter {
     this._fsm.handle('attach', callback);
   }
 
-  detach(callback: (err?: Error) => void): void {
-    this._fsm.handle('detach', callback);
+  detach(): void {
+    this._fsm.handle('detach');
   }
 
   /**
