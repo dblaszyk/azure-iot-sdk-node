@@ -8,16 +8,19 @@ import { AmqpLink } from './amqp_link_interface';
 
 const debug = dbg('SenderLink');
 
+interface MessageOperation {
+  message: Message;
+  callback: (err?: Error, result?: results.MessageEnqueued) => void;
+}
+
 export class SenderLink extends EventEmitter implements AmqpLink {
   private _linkAddress: string;
   private _linkOptions: any;
   private _linkObject: any;
   private _fsm: machina.Fsm;
   private _amqp10Client: amqp10.AmqpClient;
-  private _messageQueue: {
-    message: Message,
-    callback: (err?: Error, result?: results.MessageEnqueued) => void
-  }[];
+  private _unsentMessageQueue: MessageOperation[];
+  private _pendingMessageQueue: MessageOperation[];
   private _detachHandler: (detachEvent: any) => void;
   private _errorHandler: (err: Error) => void;
 
@@ -26,7 +29,8 @@ export class SenderLink extends EventEmitter implements AmqpLink {
     this._linkAddress = linkAddress;
     this._linkOptions = linkOptions;
     this._amqp10Client = amqp10Client;
-    this._messageQueue = [];
+    this._unsentMessageQueue = [];
+    this._pendingMessageQueue = [];
 
     this._detachHandler = (detachEvent: any): void => {
       this._fsm.transition('detaching', detachEvent.error);
@@ -37,7 +41,7 @@ export class SenderLink extends EventEmitter implements AmqpLink {
     };
 
     const pushToQueue = (message, callback) => {
-      this._messageQueue.push({
+      this._unsentMessageQueue.push({
         message: message,
         callback: callback
       });
@@ -48,13 +52,23 @@ export class SenderLink extends EventEmitter implements AmqpLink {
       states: {
         detached: {
           _onEnter: (callback, err) => {
-            if (this._messageQueue.length > 0) {
-              let messageCallbackError = err || new Error('Link Detached'); // Do we need a better custom error here?
+            if (this._unsentMessageQueue.length > 0) {
+              let messageCallbackError = err || new Error('Link Detached');
 
-              let toSend = this._messageQueue.shift();
-              while (toSend) {
-                toSend.callback(messageCallbackError);
-                toSend = this._messageQueue.shift();
+              let unsent = this._unsentMessageQueue.shift();
+              while (unsent) {
+                unsent.callback(messageCallbackError);
+                unsent = this._unsentMessageQueue.shift();
+              }
+            }
+
+            if (this._pendingMessageQueue.length > 0) {
+              let messageCallbackError = err || new Error('Link Detached');
+
+              let pending = this._pendingMessageQueue.shift();
+              while (pending) {
+                pending.callback(messageCallbackError);
+                pending = this._pendingMessageQueue.shift();
               }
             }
 
@@ -83,12 +97,12 @@ export class SenderLink extends EventEmitter implements AmqpLink {
         },
         attached: {
           _onEnter: (callback) => {
-            if (callback) callback();
-            let toSend = this._messageQueue.shift();
+            let toSend = this._unsentMessageQueue.shift();
             while (toSend) {
               this._fsm.handle('send', toSend.message, toSend.callback);
-              toSend = this._messageQueue.shift();
+              toSend = this._unsentMessageQueue.shift();
             }
+            if (callback) callback();
           },
           _onExit: () => {
             this._linkObject.removeListener('detached', this._detachHandler);
@@ -96,20 +110,31 @@ export class SenderLink extends EventEmitter implements AmqpLink {
           attach: (callback) => callback(),
           detach: () => this._fsm.transition('detaching'),
           send: (message, callback) => {
+            const op = {
+              message: message,
+              callback: callback
+            };
+
+            this._pendingMessageQueue.push(op);
+
             /*Codes_SRS_NODE_COMMON_AMQP_16_011: [All methods should treat the `done` callback argument as optional and not throw if it is not passed as argument.]*/
-            let _safeCallback = (callback, error?, result?) => {
-              if (callback) {
-                process.nextTick(() => callback(error, result));
+            let _processPendingMessageCallback = (error?, result?) => {
+              const opIndex = this._pendingMessageQueue.indexOf(op);
+              if (opIndex >= 0) {
+                this._pendingMessageQueue.splice(opIndex, 1);
+                if (op.callback) {
+                  process.nextTick(() => callback(error, result));
+                }
               }
             };
+
             this._linkObject.send(message)
                             .then((state) => {
-                              _safeCallback(callback, null, new results.MessageEnqueued(state));
+                              _processPendingMessageCallback(null, new results.MessageEnqueued(state));
                               return null;
                             })
                             .catch((err) => {
-                              /*Codes_SRS_NODE_IOTHUB_AMQPCOMMON_16_007: [If sendEvent encounters an error before it can send the request, it shall invoke the `done` callback function and pass the standard JavaScript Error object with a text description of the error (err.message).]*/
-                              _safeCallback(callback, err);
+                              _processPendingMessageCallback(err);
                             });
           }
         },

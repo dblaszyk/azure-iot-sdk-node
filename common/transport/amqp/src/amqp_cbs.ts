@@ -53,6 +53,7 @@ export class ClaimsBasedSecurityAgent extends EventEmitter {
   private static _putTokenSendingEndpoint: string = '$cbs';
   private static _putTokenReceivingEndpoint: string = '$cbs';
   private _amqp10Client: amqp10.AmqpClient;
+  private _errorHandler: (err: Error)  => void;
   private _fsm: machina.Fsm;
   private _senderLink: SenderLink;
   private _receiverLink: ReceiverLink;
@@ -65,10 +66,19 @@ export class ClaimsBasedSecurityAgent extends EventEmitter {
 
   constructor(amqp10Client: amqp10.AmqpClient) {
     super();
+
+    this._errorHandler = (err: Error): void => {
+      this._fsm.handle('detach', err);
+    };
+
     this._amqp10Client = amqp10Client;
     this._senderLink = new SenderLink(ClaimsBasedSecurityAgent._putTokenSendingEndpoint, { encoder: (body) => body }, this._amqp10Client);
+    this._senderLink.on('error', this._errorHandler);
     this._receiverLink = new ReceiverLink(ClaimsBasedSecurityAgent._putTokenReceivingEndpoint, null, this._amqp10Client);
+    this._receiverLink.on('error', this._errorHandler);
+
     this._putTokenQueue = [];
+
     this._fsm = new machina.Fsm({
       initialState: 'detached',
       states: {
@@ -137,7 +147,7 @@ export class ClaimsBasedSecurityAgent extends EventEmitter {
               }
             });
           },
-          detach: () => this._fsm.transition('detaching'),
+          detach: (err) => this._fsm.transition('detaching', null, err),
           putToken: (audience, token, callback) => {
             this._putTokenQueue.push({
               audience: audience,
@@ -158,7 +168,7 @@ export class ClaimsBasedSecurityAgent extends EventEmitter {
             }
           },
           attach: (callback) => callback(),
-          detach: () => this._fsm.transition('detaching'),
+          detach: (err) => this._fsm.transition('detaching', null, err),
           putToken: (audience, token, putTokenCallback) => {
             /*Codes_SRS_NODE_COMMON_AMQP_06_005: [The `putToken` method shall construct an amqp message that contains the following application properties:
             'operation': 'put-token'

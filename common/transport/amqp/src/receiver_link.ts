@@ -122,7 +122,7 @@ export class ReceiverLink  extends EventEmitter implements AmqpLink {
             if (callback) callback(null, new results.MessageRejected());
           },
           abandon: (message, callback) => {
-            this._linkObject.abandon(message);
+            this._linkObject.release(message);
             if (callback) callback(null, new results.MessageAbandoned());
           }
         },

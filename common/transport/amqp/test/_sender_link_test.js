@@ -93,7 +93,7 @@ describe('SenderLink', function() {
       unlockResolve(fakeLinkObj);
     });
 
-    it('calls the callback with an error if the amqp10 link fails to send the message', function (testCallback) {
+    it('calls the callback with an error if the amqp10 link fails to send the message', function(testCallback) {
       var fakeMessage = new AmqpMessage({});
       var fakeLinkObj = new EventEmitter();
       var fakeError = new Error('fake send failure');
@@ -107,6 +107,34 @@ describe('SenderLink', function() {
           assert.strictEqual(err, fakeError);
           testCallback();
         });
+      });
+    });
+
+    it('calls the callback with the first error if the amqp10 link emits an error while the message is being sent', function(testCallback) {
+      var fakeMessage = new AmqpMessage({});
+      var fakeEmittedError = new Error('fake emitted failure');
+      var fakeRejectionError = new Error('fake rejected failure');
+      var unlockReject;
+      var fakeLinkObj = new EventEmitter();
+      fakeLinkObj.forceDetach = sinon.spy();
+      fakeLinkObj.send = function() {
+        return new Promise(function(resolve, reject) {
+          unlockReject = reject;
+        });
+      };
+      var fakeAmqp10Client = new EventEmitter();
+      fakeAmqp10Client.createSender = sinon.stub().resolves(fakeLinkObj);
+
+      var link = new SenderLink('link', {}, fakeAmqp10Client);
+      link.attach(function() {
+        link.send(fakeMessage, function(err) {
+          assert(fakeLinkObj.forceDetach.calledOnce);
+          assert.strictEqual(err, fakeEmittedError);
+          testCallback();
+        });
+
+        fakeLinkObj.emit('errorReceived', fakeEmittedError);
+        unlockReject(fakeRejectionError);
       });
     });
   });

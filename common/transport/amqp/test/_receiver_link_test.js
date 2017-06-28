@@ -19,7 +19,7 @@ describe('ReceiverLink', function() {
   },
   {
     recvLinkMethod: 'abandon',
-    amqp10LinkMethod: 'abandon'
+    amqp10LinkMethod: 'release'
   },
   ].forEach(function (testConfig) {
     describe(testConfig.recvLinkMethod, function() {
