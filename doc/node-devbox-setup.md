@@ -25,7 +25,7 @@ The SDK is entirely open-source (as you probably figured out already if you're r
 $ git clone https://github.com/azure/azure-iot-sdk-node
 ```
 
-The SDK ships in a few separate NPM packages that depend on each other. Once the repository has been cloned, some features span accross multiple packages so in order to build and test these features, we need to "link" those package together in a single environment. The following steps explain how to do that.
+The SDK ships in a few separate NPM packages that depend on each other. Once the repository has been cloned, some features span across multiple packages so in order to build and test these features, we need to "link" those package together in a single environment. The following steps explain how to do that.
 
 * If you are using _Windows_:
   * Open the **Node.js command prompt** (or a regular command prompt if you made sure the node location was added to the PATH)
